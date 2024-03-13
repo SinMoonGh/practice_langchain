@@ -1,60 +1,74 @@
-from langchain_openai import OpenAIEmbeddings
-from langchain_community.document_loaders import WebBaseLoader
-from langchain_community.vectorstores import FAISS
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.documents import Document
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
-from langchain.chains import create_retrieval_chain
 import streamlit as st
+from langchain_community.document_loaders import WebBaseLoader
 from dotenv import load_dotenv
 import os
+from langchain_openai import OpenAIEmbeddings
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_community.vectorstores import FAISS
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_openai import ChatOpenAI
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain.chains import create_retrieval_chain
 
-# .env 파일에서 환경 변수를 로드합니다.
+# 제목
+st.title("URL crawling service")
+
+# 사이드 바에 채팅 목록 표시하기
+with st.sidebar:
+    click_cl = st.button(label='chat_list')
+    # if click_cl:
+    #     st.write(url_input)
+    #     st.write(f'{question_input}')
+
+# api key 가져오기
 load_dotenv()
+openai_api_key=os.getenv("NEW_API_KEY")
 
-# 환경 변수를 사용하여 API 키를 불러옵니다.
-openai_api_key = os.getenv('NEW_API_KEY')
+# docs 정보 가져오기
+url_input = st.text_input(label="",
+                         help="저희 서비스는 희망하시는 웹 페이지의 정보를 가져와서 해당 웹 페이지에서 제공하는 정보를 손 쉽게 제공해주는 서비스입니다.",
+                         placeholder='정보를 제공 받기 희망하시는 url 주소를 적어주세요.')
+question_input = st.chat_input(placeholder="무엇이든 물어보세요.")
 
-llm = ChatOpenAI(openai_api_key=openai_api_key)
+if target_url := url_input:
+    loader = WebBaseLoader(target_url)
+    docs = loader.load()
 
-st.header("크롤링 봇")
-st.info("국민취업지원제도에 관련된 서비스를 제공합니다. 무엇이든 물어보세요.")
-st.error("교육 커리큘럼 내용이 적용되어 있습니다.")
+    # llm 인스턴스 생성
+    llm = ChatOpenAI(openai_api_key=openai_api_key)
 
-loader = WebBaseLoader("https://namu.wiki/w/%ED%8F%AC%EC%BC%93%EB%AA%AC%20%EB%8F%84%EA%B0%90")
+    # embeddings
+    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
 
-docs = loader.load()
+    text_splitter = RecursiveCharacterTextSplitter()
+    documents = text_splitter.split_documents(docs)
+    vector = FAISS.from_documents(documents, embeddings)
 
-embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+    # 프롬프트 구성
+    prompt = ChatPromptTemplate.from_template("""Answer the following question based only on the provided context:
 
-text_splitter = RecursiveCharacterTextSplitter()
-documents = text_splitter.split_documents(docs)
-vector = FAISS.from_documents(documents, embeddings)
+    <context>
+    {context}
+    </context>
 
-prompt = ChatPromptTemplate.from_template("""Answer the following question based only on the provided context:
+    Question: {input}""")
 
-<context>
-{context}
-</context>
+    # document_chain 구성
+    document_chain = create_stuff_documents_chain(llm, prompt)
 
-Question: {input}""")
+    # 검색기 구성
+    retriever = vector.as_retriever()
+    retrieval_chain = create_retrieval_chain(retriever, document_chain)
 
-document_chain = create_stuff_documents_chain(llm, prompt)
+    # 요청
+    if question:=question_input:
+        response = retrieval_chain.invoke({"input": question})
+        answer = st.write(response["answer"])
+    else:
+        st.stop()
 
-document_chain.invoke({
-    "input": "피카츄의 속성을 알려줘",
-    "context": [Document(page_content="""전국: 0001
-성도: 231
-호연: 203RSE
-센트럴칼로스: 080
-가라르: 068갑옷섬
-팔데아: 164블루베리""")]
-})
 
-retriever = vector.as_retriever()
-retrieval_chain = create_retrieval_chain(retriever, document_chain)
+        
 
-response = retrieval_chain.invoke({"input": "국민취업지원제도가 뭐야"})
-print(response["answer"])
+
+
